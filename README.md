@@ -47,7 +47,7 @@ Outdated packages or packages that are not configured for download *(anymore)* a
 The Python script requires the os, sys, wget, urllib and progressbar modules.
 The script extracts the name of the repository as well as the filename from the input parameter with the download URL. *(If a URL of a repository you are using has an 'exotic' structure, it might be necessary to slightly adjust the logic implemented in lines 115 - 118).*
 
-If the local mirror cannot be reached or the file in question is not *(yet)* available there, the package will be downloaded from the original URL. An asterisk * in front of the dowload progress bar indicates that the package exists on the local mirror and is being loaded from there.
+If the local mirror cannot be reached or the file in question is not *(yet)* available there, the package will be downloaded from the original URL. When installing or updating packages an asterisk * in front of the dowload progress bar indicates that the package exists on the local mirror and is being loaded from there.
 
  ## License:
  GPL v3
