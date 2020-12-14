@@ -1,4 +1,4 @@
-# Pacyard - a selective local mirror for pacman (Arch Linux):
+# Pacyard - a selective local mirror for pacman (Arch Linux)
 
 pacyard is a local mirror for Arch Linux packages.
 
@@ -10,7 +10,7 @@ There is no need to have ArchLinux installed on the server. *In principle, the s
 
 The script `pacyard.py` operating on the local mirror may run under Python2 as well as Python3 *(in my case on a Linux based videorecorder 'vuduo2' with Python 2.79)*. As the actual download workhorse the script makes use of `wget`.
 
-## Usecase
+## Usecases:
 If several devices in your LAN run ArchLinux, pacyard can significantly **reduce the download data volume** for package updates.
 
 In addition, the faster your LAN is compared to your internet connection, the **faster** the **update process** runs, because pacyard does not download the packages on-demand, but in advance – via cron-job.
