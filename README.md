@@ -42,7 +42,7 @@ It iterates over all servers which are configured for each repository and downlo
 
 Outdated packages or packages that are not configured for download *(anymore)* are automatically deleted. Existing versions of package files will not be downloaded again.
 
-## Notes on pacman_xfer.py:
+## Notes on `pacman_xfer.py`:
 
 The Python script requires the os, sys, wget, urllib and progressbar modules.
 The script extracts the name of the repository as well as the filename from the input parameter with the download URL. *(If a URL of a repository you are using has an 'exotic' structure, it might be necessary to slightly adjust the logic implemented in lines 115 - 118).*
