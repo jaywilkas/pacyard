@@ -41,14 +41,14 @@ def debug_print(*args):
 # -----------------------------------------------------------------------------------
 def debug_print_r(txt):
     """
-    Print  txt  without '\n' , in casse the globale variable  verbose  is True
+    Print  txt  without '\n' , in case the globale variable  verbose  is True
     or if this is an error message
 
     :param  txt:   text to print
     """
 
     global verbose
-    if not verbose  and  not args[0].startswith('Error'):
+    if not verbose  and  not txt.startswith('Error'):
         return
 
     if not hasattr(debug_print_r, "last_len"):
