@@ -363,7 +363,7 @@ def remove_package_files_not_in_db(sqliteConnection, repo_list):
     debug_print("removing package-files not in DB")
 
     for repo in repo_list:
-        file_path_list = glob.glob(repo + '/*.pgk.*')
+        file_path_list = glob.glob(repo + '/*.pkg.*')
 
         # remove .sig - files from listing
         for i, file_path in enumerate(file_path_list):
