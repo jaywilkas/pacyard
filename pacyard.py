@@ -429,6 +429,7 @@ def update_table_localmirror(sqliteConnection, name, filename, repo, builddate):
 
     values = (name, filename, repo, builddate)
     sqliteConnection.execute(sql_insert, values)
+    sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
 
