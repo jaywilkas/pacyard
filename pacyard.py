@@ -117,7 +117,7 @@ def create_tables(sqliteConnection):
 
     sql_local_mirror  = 'CREATE TABLE IF NOT EXISTS '                       +\
                         'local_mirror '                                     +\
-                        '(name TEXT PRIMARY KEY, filename TEXT NOT NULL, '  +\
+                        '(name TEXT, filename TEXT NOT NULL PRIMARY KEY, '  +\
                         'repo TEXT NOT NULL, builddate INTEGER);'
 
     sql_db_hashes     = 'CREATE TABLE IF NOT EXISTS '                       +\
