@@ -17,50 +17,43 @@ import inspect
 
 
 # -----------------------------------------------------------------------------------
-def debug_print(*args):
+def debug_print(txt, end='\n'):
     """
-    Print all args, in casse the globale variable  verbose  is True
-    or if this is an error message
-
-    :param   *args:  list of arguments
-    :return:
-    """
-
-    global verbose
-    if not verbose and not args[0].startswith('Error'):
-        return
-    
-    space = ' ' * (len(inspect.stack(0)) - 1)
-
-    for arg in args:
-        print(space + arg)
-    sys.stdout.flush()
-# -----------------------------------------------------------------------------------
-
-
-# -----------------------------------------------------------------------------------
-def debug_print_r(txt):
-    """
-    Print  txt  without '\n' , in case the globale variable  verbose  is True
+    Print  txt  in case the globale variable  verbose  is True
     or if this is an error message
 
     :param  txt:   text to print
     """
-
+    
     global verbose
     if not verbose  and  not txt.startswith('Error'):
         return
 
-    if not hasattr(debug_print_r, "last_len"):
-        debug_print_r.last_len = 0
-        
+    if not hasattr(debug_print, "last_len"):
+        debug_print.last_len = 0
+
     space = ' ' * (len(inspect.stack(0)) - 1)
     txt = space + txt
 
-    delta_len = max(0, debug_print_r.last_len - len(txt))
-    debug_print_r.last_len = len(txt)
-    print(txt + ' ' * delta_len, end='\r')
+    delta_len = max(0, debug_print.last_len - len(txt))
+    debug_print.last_len = len(txt)
+    print(txt + ' ' * delta_len, end=end)
     sys.stdout.flush()
+# -----------------------------------------------------------------------------------
+
+
+# -----------------------------------------------------------------------------------
+def try_unlink(file_path):
+    """
+    tries to unlink a file
+
+    :param file_path:  path to the file
+    """
+    
+    try:
+        os.unlink(file_path)
+    except:
+        pass
 # -----------------------------------------------------------------------------------
 
 
@@ -234,9 +227,9 @@ def read_config(repo_list, file_name='config.ini'):
             lines[i] = line.replace('Server', '_server_' + str(suffix))
             suffix += 1
     s_config = ''.join(lines)
-    
+
     config = configparser.ConfigParser()
-    
+
     try:
         config.read_string(s_config)
     except:
@@ -247,7 +240,7 @@ def read_config(repo_list, file_name='config.ini'):
         except:
             debug_print("Error: Can't parse config-file")
             sys.exit(1)
-        
+
     try:
         config_dict['num_versions_to_keep'] = \
                       config.getint('options', 'NumVersionsToKeep')
@@ -292,7 +285,7 @@ def remove_old_packages(sqliteConnection, config):
     :param  config:            dict with the parsed content of the config-file
     """
 
-    debug_print("removing older packages")
+    debug_print("removing older packages from HDD")
 
     sql_select = 'SELECT name, filename, repo, builddate ' +\
                  'FROM local_mirror '                      +\
@@ -309,22 +302,19 @@ def remove_old_packages(sqliteConnection, config):
             last_name = row[0]
             num_version = 1
         else:
-            num_version += 1
+            num_version += 1            
             if num_version > num_versions_to_keep:
                 remove_dict[row[1]] = row[2]
                 debug_print('  ' + row[1])
 
     for filename in remove_dict.keys():
         sql_delete = "DELETE FROM local_mirror " +\
-                     "WHERE filename is '" + filename + "';"
-        sqliteConnection.execute(sql_delete)
+                     "WHERE filename=?;"
+        sqliteConnection.execute(sql_delete, (filename,))
         repo = remove_dict[filename]
         file_path = os.path.join(repo, filename)
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-        file_path += '.sig'
-        if os.path.exists(file_path):
-            os.unlink(file_path)
+        try_unlink(file_path)
+        try_unlink(file_path + '.sig')
 
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
@@ -333,12 +323,12 @@ def remove_old_packages(sqliteConnection, config):
 # -----------------------------------------------------------------------------------
 def remove_old_dbhashes(sqliteConnection):
     """
-    delete db-hashes from DB which are older than 60 days
+    delete db-file - hashes from DB which are older than 60 days
 
     :param  sqliteConnection:  SQLite3 connection object
     """
 
-    debug_print("removing older hashes from db")
+    debug_print("removing older DB-file - hashes from DB")
 
     seconds = time.time()
     epoch_day = int(seconds / 24 / 3600)
@@ -360,7 +350,7 @@ def remove_package_files_not_in_db(sqliteConnection, repo_list):
     :param   repo_list:         list of repositories
     """
 
-    debug_print("removing package-files not in DB")
+    debug_print("removing package-files from HDD which are not in DB")
 
     for repo in repo_list:
         file_path_list = glob.glob(repo + '/*.pkg.*')
@@ -374,11 +364,9 @@ def remove_package_files_not_in_db(sqliteConnection, repo_list):
         for file_path in file_path_list:
             filename = os.path.basename(file_path)
             if not is_in_localmirror(sqliteConnection, filename):
-                debug_print('removing package' + filename)
-                os.unlink(file_path)
-                file_path += '.sig'
-                if os.path.exists(file_path):
-                    os.unlink(file_path)
+                debug_print(' removing package ' + filename)
+                try_unlink(file_path)
+                try_unlink(file_path + '.sig')
 # -----------------------------------------------------------------------------------
 
 
@@ -403,8 +391,8 @@ def cleanup_table_localmirror(sqliteConnection):
             debug_print('removing package ' + \
                          os.path.basename(file_path) + ' from DB')
             sql_delete = "DELETE FROM local_mirror " +\
-                         "WHERE filename IS '" + row[0] + "';"
-            sqliteConnection.execute(sql_delete)
+                         "WHERE filename=?;"
+            sqliteConnection.execute(sql_delete, (row[0],))
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
@@ -421,8 +409,7 @@ def update_table_localmirror(sqliteConnection, name, filename, repo, builddate):
     :param builddate: builddate of the package file
     """
 
-    debug_print("updating DB-table 'local_mirror'")
-    debug_print('insert (or ignore) ' + filename)
+    debug_print('-> DB-table "local_mirror": ' + filename)
 
     sql_insert = 'INSERT OR IGNORE INTO local_mirror '  +\
                  '(name, filename, repo, builddate) VALUES(?,?,?,?);'
@@ -437,17 +424,17 @@ def update_table_localmirror(sqliteConnection, name, filename, repo, builddate):
 def download(url, file_path):
     """
     download the file and save it under file_path
-    
+
     :param  url:   url to the file
     :file_path:    path/filename where to save the file
     :return:       True on success, otherwise False
     """
 
     if os.path.exists(file_path):
-        debug_print(os.path.basename(file_path) + ' already exists')
+        debug_print('[already exists ] ' + os.path.basename(file_path), end='\r')
         return True
     else:
-        debug_print('Downloading ' + os.path.basename(file_path))
+        debug_print('[downloading ] ' + os.path.basename(file_path))
 
     cmd = "wget -c -T 5 -O '" + file_path + "' " + url
     if not verbose:
@@ -461,8 +448,7 @@ def download(url, file_path):
             raise
     except:
         debug_print("Error: Can't download file")
-        if os.path.exists(file_path):
-            os.unlink(file_path)
+        try_unlink(file_path)
         return False
 # -----------------------------------------------------------------------------------
 
@@ -484,13 +470,12 @@ def download_db(mirror, repo, arch):
     url = os.path.join(url, db_file_name)
     file_path = os.path.join('tmp', db_file_name)
 
-    if os.path.exists(file_path):
-        os.unlink(file_path)
+    try_unlink(file_path)
 
     status = download(url, file_path)
     if status is False:
         return None, None
-    
+
     with open(file_path, 'rb') as f:
         md5sum = hashlib.md5(f.read()).hexdigest()
 
@@ -510,13 +495,14 @@ def get_repo_content(file_path):
     """
 
     repo_content = dict()
+    debug_print('extracting repo DB-file ...')
     with tarfile.open(file_path, "r:gz") as tar:
-        debug_print_r('extracting...')
+        debug_print('collecting package info ...')
 
         for member in tar.getmembers():
             if not member.name.endswith("/desc"):
                 continue
-            debug_print_r(member.name[:-5])
+            debug_print(member.name[:-5], end='\r')
             f = tar.extractfile(member)
             lines = f.readlines()
             f.close()
@@ -537,12 +523,11 @@ def get_repo_content(file_path):
                         debug_print("Error: in get_repo_content() " +\
                                file_path + " " + member)
                         sys.exit(1)
-                        #break
                 except:
                     pass
 
-    debug_print_r(' ')
-    os.unlink(file_path)
+    debug_print(' ', end='\r')
+    try_unlink(file_path)
 
     return repo_content
 # -----------------------------------------------------------------------------------
@@ -560,9 +545,9 @@ def is_installed(sqliteConnection, name):
 
     sql = "SELECT COUNT() "              +\
           "FROM installed_packages "     +\
-          "WHERE name IS '" + name + "';"
+          "WHERE name=?;"
     cursor = sqliteConnection.cursor()
-    cursor.execute(sql)
+    cursor.execute(sql, (name,))
     numberOfRows = cursor.fetchone()[0]
 
     if numberOfRows == 0:
@@ -583,9 +568,9 @@ def is_in_localmirror(sqliteConnection, filename):
     """
 
     sql = "SELECT COUNT() FROM local_mirror " +\
-          "WHERE filename IS '" + filename + "';"
+          "WHERE filename=?;"
     cursor = sqliteConnection.cursor()
-    cursor.execute(sql)
+    cursor.execute(sql, (filename,))
     numberOfRows = cursor.fetchone()[0]
 
     if numberOfRows == 0:
@@ -606,9 +591,9 @@ def is_hash_known(sqliteConnection, hash_dbfile):
     """
 
     sql = "SELECT COUNT() FROM db_hashes " +\
-          "WHERE hash IS '" + hash_dbfile + "';"
+          "WHERE hash=?;"
     cursor = sqliteConnection.cursor()
-    cursor.execute(sql)
+    cursor.execute(sql, (hash_dbfile,))
     numberOfRows = cursor.fetchone()[0]
 
     if numberOfRows >= 1:
@@ -652,11 +637,11 @@ def get_num_of_new_packages(sqliteConnection, name, filename, builddate):
     """
 
     sql = "SELECT COUNT() FROM local_mirror"    + \
-          " WHERE name IS '" + name + "'"       + \
+          " WHERE name=?"                       + \
           " AND builddate >= " + str(builddate) + ";"
 
     cursor = sqliteConnection.cursor()
-    cursor.execute(sql)
+    cursor.execute(sql, (name,))
     numberOfRows = cursor.fetchone()[0]
 
     return numberOfRows
@@ -688,27 +673,27 @@ def update_localmirror(sqliteConnection, repo_list, config):
             if hash_dbfile is None:
                 continue
             if is_hash_known(sqliteConnection, hash_dbfile):
-                debug_print('Skipping repo-db (knwon hash)')
+                debug_print('skipping repo DB-file (known hash)')
                 continue
             add_hash(sqliteConnection, hash_dbfile)
 
             repo_content = get_repo_content(file_path)
             for filename in repo_content.keys():
-                debug_print(filename)
                 name, builddate = repo_content[filename]
 
                 if not is_installed(sqliteConnection, name):
-                    debug_print(' not installed')
+                    debug_print(' [not installed  ] ' + filename, end='\r')
                     continue
                 num = get_num_of_new_packages(sqliteConnection,
                                               name, filename, builddate)
                 if num >= config['num_versions_to_keep']:
-                    debug_print(' not a new(er) version')
+                    debug_print(' [version too old] ' + filename, end='\r')
                     continue
 
                 file_path = os.path.join(repo, filename)
                 url = mirror.replace('$repo', repo).replace('$arch', arch)
                 url = os.path.join(url, filename)
+                debug_print(' ', end='\r')
                 download(url, file_path)
                 url += '.sig'
                 file_path += '.sig'
@@ -722,12 +707,12 @@ def update_localmirror(sqliteConnection, repo_list, config):
 def create_sub_dirs(repo_list):
     """
     Create the sub-dirs (if they don't exist)
-    one for each resp, for the package-files 
+    one for each resp, for the package-files
     plus a tmp-dir (for the <reponame>.db.tar.gz - files)
 
     :param   repo_list:    list of repositories
     """
-    
+
     def create_sub_dir(sub_dir):
         if not os.path.exists(sub_dir):
             try:
