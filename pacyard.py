@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-
 from __future__ import print_function
 import os
 import sys
@@ -12,9 +11,9 @@ from six.moves import configparser
 import tarfile
 import hashlib
 import time
+import requests
+import datetime
 import inspect
-
-
 
 # -----------------------------------------------------------------------------------
 def debug_print(txt, end='\n'):
@@ -41,7 +40,6 @@ def debug_print(txt, end='\n'):
     sys.stdout.flush()
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def try_unlink(file_path):
     """
@@ -55,7 +53,6 @@ def try_unlink(file_path):
     except:
         pass
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def open_sqlite_db(db_file):
@@ -72,7 +69,6 @@ def open_sqlite_db(db_file):
 
     return sqliteConnection
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def create_db_connection(db_file):
@@ -91,7 +87,6 @@ def create_db_connection(db_file):
         debug_print("Error:  Can't connect DB")
         sys.exit(1)
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def create_tables(sqliteConnection):
@@ -116,16 +111,21 @@ def create_tables(sqliteConnection):
     sql_db_hashes     = 'CREATE TABLE IF NOT EXISTS '                       +\
                         'db_hashes '                                        +\
                         '(epoch_day INTEGER, hash TEXT);'
+
+    sql_db_downloads  = 'CREATE TABLE IF NOT EXISTS '                       +\
+                        'db_downloads '                                     +\
+                        '(db_timestamp TEXT, db_url TEXT PRIMARY KEY);'
+
     try:
         sqliteConnection.execute(sql_inst_packages)
         sqliteConnection.execute(sql_local_mirror)
         sqliteConnection.execute(sql_db_hashes)
+        sqliteConnection.execute(sql_db_downloads)
         sqliteConnection.commit()
     except:
         debug_print("Error: Can't create DB-tables")
         sys.exit(1)
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def import_packages_files(sqliteConnection):
@@ -178,7 +178,6 @@ def import_packages_files(sqliteConnection):
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def get_repo_list(sqliteConnection):
     """
@@ -200,7 +199,6 @@ def get_repo_list(sqliteConnection):
 
     return repo_list
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def read_config(repo_list, file_name='config.ini'):
@@ -275,7 +273,6 @@ def read_config(repo_list, file_name='config.ini'):
     return config_dict
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def remove_old_packages(sqliteConnection, config):
     """
@@ -319,7 +316,6 @@ def remove_old_packages(sqliteConnection, config):
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def remove_old_dbhashes(sqliteConnection):
     """
@@ -340,6 +336,23 @@ def remove_old_dbhashes(sqliteConnection):
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------------
+def remove_old_dbdownloads(sqliteConnection):
+    """
+    delete db-download entries from DB which are older than 60 days
+
+    :param  sqliteConnection:  SQLite3 connection object
+    """
+
+    debug_print("removing older DB-file - download entries from DB")
+
+    limit = str(time.time() - 60 * 24*3600)
+    sql_delete = "DELETE FROM db_downloads " + \
+                 "WHERE epoch < " + limit + ";"
+
+    sqliteConnection.execute(sql_delete)
+    sqliteConnection.commit()
+# -----------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------------
 def remove_package_files_not_in_db(sqliteConnection, repo_list):
@@ -369,7 +382,6 @@ def remove_package_files_not_in_db(sqliteConnection, repo_list):
                 try_unlink(file_path + '.sig')
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def cleanup_table_localmirror(sqliteConnection):
     """
@@ -396,7 +408,6 @@ def cleanup_table_localmirror(sqliteConnection):
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def update_table_localmirror(sqliteConnection, name, filename, repo, builddate):
     """
@@ -418,7 +429,6 @@ def update_table_localmirror(sqliteConnection, name, filename, repo, builddate):
     sqliteConnection.execute(sql_insert, values)
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def download(url, file_path):
@@ -452,29 +462,53 @@ def download(url, file_path):
         return False
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
-def download_db(mirror, repo, arch):
+def download_db(sqliteConnection, mirror, repo, arch):
     """
     download the <repo>.db.tar.gz - file from the mirror
     and calculate it's md5-hash
+    if the repo-DB is unknown (i.e. wasn't already downloaded before)
 
-    :param   mirror      url of the mirror (containing $repo and $arch)
-    :param   repo:       name of the repository
-    :param   arch:       architecture
-    :return:             path of the downloaded file, md5sum
+    :param  sqliteConnection  SQlite3 connection
+    :param  mirror            url of the mirror (containing $repo and $arch)
+    :param  repo:             name of the repository
+    :param  arch:             architecture
+    :return:                  path of the downloaded file, md5sum
     """
 
     db_file_name = repo + '.db.tar.gz'
-    url = mirror.replace('$repo', repo).replace('$arch', arch)
-    url = os.path.join(url, db_file_name)
-    file_path = os.path.join('tmp', db_file_name)
+    db_url = mirror.replace('$repo', repo).replace('$arch', arch)
+    db_url = os.path.join(db_url, db_file_name)
 
+    #request_headers = requests.head(db_url, verify=False)
+    #db_last_modified = request_headers['last-modified']
+
+    try:
+        from subprocess import Popen, PIPE
+        response = Popen('curl -kI ' + db_url + ' 2>&1',
+                          shell=True, stdout=PIPE).stdout.read()
+        for val in response.split('\r\n'):
+            if val.lower().startswith('last-modified'):
+                db_timestamp = val[15:]
+        if is_db_known(sqliteConnection, db_url, db_timestamp):
+            debug_print('skipping download of repo DB-file (known database)')
+            return None, None
+    except:
+        debug_print("no Last-Modified entry in request headers")
+        f = open('problem_headers.txt', 'a')
+        f.write(db_url + '\n')
+        f.write(response + '\n\n\n')
+        f.close()
+        db_timestamp = None
+
+    file_path = os.path.join('tmp', db_file_name)
     try_unlink(file_path)
 
-    status = download(url, file_path)
+    status = download(db_url, file_path)
     if status is False:
         return None, None
+
+    add_known_db(sqliteConnection, db_url, db_timestamp)
 
     with open(file_path, 'rb') as f:
         md5sum = hashlib.md5(f.read()).hexdigest()
@@ -482,6 +516,53 @@ def download_db(mirror, repo, arch):
     return file_path, md5sum
 # -----------------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------------
+def is_db_known(sqliteConnection, db_url, db_timestamp):
+    """
+    check, whether the repo-DB is known, i.e. was already downloaded
+
+    :param  sqliteConnection     SQlite3 connection
+    :param  db_url:              URL of the repo-DB
+                                 (like https://somearch.mirror.org/core.db.tar.gz)
+    :param  db_timestamp:        creation time of the repo-DB
+    :return
+    """
+
+    sql = "SELECT COUNT() "              +\
+          "FROM db_downloads "     +\
+          "WHERE db_url=? AND db_timestamp=?;"
+    cursor = sqliteConnection.cursor()
+    cursor.execute(sql, (db_url, db_timestamp))
+    numberOfRows = cursor.fetchone()[0]
+
+    if numberOfRows == 0:
+        return False
+    else:
+        return True
+# -----------------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------------
+def add_known_db(sqliteConnection, db_url, db_timestamp):
+    """
+    add the db_url and its creation time to the database of known,
+    (i.e. already downloaded) repo DBs
+
+    :param  sqliteConnection     SQlite3 connection
+    :param  db_url:              URL of the repo-DB
+                                 (like https://somearch.mirror.org/core.db)
+    :param  db_timestamp:        creation time of the repo-DB
+    :return
+    """
+
+    if db_timestamp is None:
+        return
+
+    sql_insert = 'INSERT OR REPLACE INTO db_downloads '  +\
+                 '(db_timestamp, db_url) VALUES(?,?);'
+
+    sqliteConnection.execute(sql_insert, (db_timestamp, db_url))
+    sqliteConnection.commit()
+# -----------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------------
 def get_repo_content(file_path):
@@ -532,14 +613,13 @@ def get_repo_content(file_path):
     return repo_content
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def is_installed(sqliteConnection, name):
     """
     check, whether the package  name  is in the list of installed packages
 
     :param  sqliteConnection     SQlite3 connection
-    :param  name:                name of the paackage
+    :param  name:                name of the package
     :return
     """
 
@@ -555,7 +635,6 @@ def is_installed(sqliteConnection, name):
     else:
         return True
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def is_in_localmirror(sqliteConnection, filename):
@@ -579,7 +658,6 @@ def is_in_localmirror(sqliteConnection, filename):
         return True
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def is_hash_known(sqliteConnection, hash_dbfile):
     """
@@ -602,7 +680,6 @@ def is_hash_known(sqliteConnection, hash_dbfile):
         return False
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def add_hash(sqliteConnection, hash_dbfile):
     """
@@ -622,7 +699,6 @@ def add_hash(sqliteConnection, hash_dbfile):
     sqliteConnection.execute(sql_insert, entry)
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def get_num_of_new_packages(sqliteConnection, name, filename, builddate):
@@ -647,7 +723,6 @@ def get_num_of_new_packages(sqliteConnection, name, filename, builddate):
     return numberOfRows
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def update_localmirror(sqliteConnection, repo_list, config):
     """
@@ -668,12 +743,12 @@ def update_localmirror(sqliteConnection, repo_list, config):
 
     for repo in repo_list:
         for mirror in config[repo]:
-            file_path, hash_dbfile = download_db(mirror, repo, arch)
+            file_path, hash_dbfile = download_db(sqliteConnection, mirror, repo, arch)
 
             if hash_dbfile is None:
                 continue
             if is_hash_known(sqliteConnection, hash_dbfile):
-                debug_print('skipping repo DB-file (known hash)')
+                debug_print('skipping repo DB-file (known hash of database)')
                 continue
             add_hash(sqliteConnection, hash_dbfile)
 
@@ -702,7 +777,6 @@ def update_localmirror(sqliteConnection, repo_list, config):
                                          filename, repo, builddate)
 # -----------------------------------------------------------------------------------
 
-
 # -----------------------------------------------------------------------------------
 def create_sub_dirs(repo_list):
     """
@@ -725,7 +799,6 @@ def create_sub_dirs(repo_list):
         create_sub_dir(sub_dir)
     create_sub_dir('tmp')
 # -----------------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------------
 def main(work_dir, database_file, config_file):
@@ -764,7 +837,6 @@ def main(work_dir, database_file, config_file):
     sqliteConnection.close()
     sys.exit(0)
 # -----------------------------------------------------------------------------------
-
 
 if __name__ == '__main__':
     verbose = False
