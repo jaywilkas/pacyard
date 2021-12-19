@@ -831,6 +831,7 @@ def main(work_dir, database_file, config_file):
     update_localmirror(sqliteConnection, repo_list, config)
 
     remove_old_dbhashes(sqliteConnection)
+    remove_old_dbdownloads(sqliteConnection)
     remove_old_packages(sqliteConnection, config)
     remove_package_files_not_in_db(sqliteConnection, repo_list)
 
