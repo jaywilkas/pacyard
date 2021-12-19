@@ -18,7 +18,8 @@ In addition, the faster your LAN is compared to your internet connection, the **
 
 ## Installation and configuration:
 ### Mirror:
-On the server, the Python script `pacyard.py` should be called via cron-job. The first parameter of the `main()` - function *(in line 804)* specifies the working directory and must be adjusted accordingly. The corresponding configuration file `pacyard.conf` *(see ReadMe_ConfigFile.txt)* must be located in the working directory.
+On the server, the Python script `pacyard.py` should be started as a cron-job.  
+The first parameter of the `main()` - function *(in line 844)* specifies the working directory and must be adjusted accordingly. The corresponding configuration file `pacyard.conf` *(see ReadMe_ConfigFile.txt)* must be located in the working directory.
 
  In order to tell the program which packages to download, invoke `./pacyard.py -i` . Thereby all files *(in the same directory)* with the pattern `packages_<REPO>_<HOSTNAME>.txt` are read and the included package names are stored in the *(if necessary newly created)* SQLite-DB `pacyard.db`. These txt files can for example be generated with the script `gen_package_lists.sh`. After the import these txt-files can be deleted.
 
