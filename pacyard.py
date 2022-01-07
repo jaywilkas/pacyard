@@ -15,6 +15,7 @@ import requests
 import datetime
 import inspect
 
+
 # -----------------------------------------------------------------------------------
 def debug_print(txt, end='\n'):
     """
@@ -23,7 +24,7 @@ def debug_print(txt, end='\n'):
 
     :param  txt:   text to print
     """
-    
+
     global verbose
     if not verbose  and  not txt.startswith('Error'):
         return
@@ -47,7 +48,7 @@ def try_unlink(file_path):
 
     :param file_path:  path to the file
     """
-    
+
     try:
         os.unlink(file_path)
     except:
@@ -91,7 +92,8 @@ def create_db_connection(db_file):
 # -----------------------------------------------------------------------------------
 def create_tables(sqliteConnection):
     """
-     create tables if they don't yet exist
+    create tables if they don't yet exist
+    first check, if table(s) have the correct (newest) format
 
     :param   sqliteConnection:  SQLite3 connection object
     :return:
@@ -114,7 +116,20 @@ def create_tables(sqliteConnection):
 
     sql_db_downloads  = 'CREATE TABLE IF NOT EXISTS '                       +\
                         'db_downloads '                                     +\
-                        '(db_timestamp TEXT, db_url TEXT PRIMARY KEY);'
+                        '(db_timestamp TEXT, epoch_day INTEGER, '           +\
+                        'db_url TEXT PRIMARY KEY);'
+
+
+    # if table db_hashes doesn't have the new format (3 columns): drop table
+    cursor = sqliteConnection.cursor()
+    try:
+        cursor.execute('SELECT * from db_downloads LIMIT 0')
+        if len(cursor.description) != 3:
+            sqliteConnection.execute('DROP TABLE db_downloads')
+    except:
+        pass
+    cursor.close()
+
 
     try:
         sqliteConnection.execute(sql_inst_packages)
@@ -197,6 +212,7 @@ def get_repo_list(sqliteConnection):
         debug_print(('  ' + row[0]))
         repo_list.append(row[0])
 
+    cursor.close()
     return repo_list
 # -----------------------------------------------------------------------------------
 
@@ -299,7 +315,7 @@ def remove_old_packages(sqliteConnection, config):
             last_name = row[0]
             num_version = 1
         else:
-            num_version += 1            
+            num_version += 1
             if num_version > num_versions_to_keep:
                 remove_dict[row[1]] = row[2]
                 debug_print('  ' + row[1])
@@ -314,6 +330,7 @@ def remove_old_packages(sqliteConnection, config):
         try_unlink(file_path + '.sig')
 
     sqliteConnection.commit()
+    cursor.close()
 # -----------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------------
@@ -344,11 +361,13 @@ def remove_old_dbdownloads(sqliteConnection):
     :param  sqliteConnection:  SQLite3 connection object
     """
 
+    seconds = time.time()
+    epoch_day = int(seconds / 24 / 3600)
+    limit = str(epoch_day - 60)
     debug_print("removing older DB-file - download entries from DB")
 
-    limit = str(time.time() - 60 * 24*3600)
     sql_delete = "DELETE FROM db_downloads " + \
-                 "WHERE epoch < " + limit + ";"
+                 "WHERE epoch_day < " + limit + ";"
 
     sqliteConnection.execute(sql_delete)
     sqliteConnection.commit()
@@ -397,6 +416,7 @@ def cleanup_table_localmirror(sqliteConnection):
     sql_select = 'SELECT filename, repo FROM local_mirror;'
     cursor = sqliteConnection.cursor()
     cursor.execute(sql_select)
+
     for row in cursor.fetchall():
         file_path = os.path.join(row[1], row[0])
         if not os.path.exists(file_path):
@@ -405,7 +425,9 @@ def cleanup_table_localmirror(sqliteConnection):
             sql_delete = "DELETE FROM local_mirror " +\
                          "WHERE filename=?;"
             sqliteConnection.execute(sql_delete, (row[0],))
+
     sqliteConnection.commit()
+    cursor.close()
 # -----------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------------
@@ -495,10 +517,6 @@ def download_db(sqliteConnection, mirror, repo, arch):
             return None, None
     except:
         debug_print("no Last-Modified entry in request headers")
-        f = open('problem_headers.txt', 'a')
-        f.write(db_url + '\n')
-        f.write(response + '\n\n\n')
-        f.close()
         db_timestamp = None
 
     file_path = os.path.join('tmp', db_file_name)
@@ -531,9 +549,11 @@ def is_db_known(sqliteConnection, db_url, db_timestamp):
     sql = "SELECT COUNT() "              +\
           "FROM db_downloads "     +\
           "WHERE db_url=? AND db_timestamp=?;"
+
     cursor = sqliteConnection.cursor()
     cursor.execute(sql, (db_url, db_timestamp))
     numberOfRows = cursor.fetchone()[0]
+    cursor.close()
 
     if numberOfRows == 0:
         return False
@@ -558,9 +578,12 @@ def add_known_db(sqliteConnection, db_url, db_timestamp):
         return
 
     sql_insert = 'INSERT OR REPLACE INTO db_downloads '  +\
-                 '(db_timestamp, db_url) VALUES(?,?);'
+                 '(db_timestamp, epoch_day, db_url) VALUES(?,?,?);'
 
-    sqliteConnection.execute(sql_insert, (db_timestamp, db_url))
+    seconds = time.time()
+    epoch_day = int(seconds / 24 / 3600)
+
+    sqliteConnection.execute(sql_insert, (db_timestamp, epoch_day, db_url))
     sqliteConnection.commit()
 # -----------------------------------------------------------------------------------
 
@@ -626,9 +649,11 @@ def is_installed(sqliteConnection, name):
     sql = "SELECT COUNT() "              +\
           "FROM installed_packages "     +\
           "WHERE name=?;"
+
     cursor = sqliteConnection.cursor()
     cursor.execute(sql, (name,))
     numberOfRows = cursor.fetchone()[0]
+    cursor.close()
 
     if numberOfRows == 0:
         return False
@@ -648,9 +673,11 @@ def is_in_localmirror(sqliteConnection, filename):
 
     sql = "SELECT COUNT() FROM local_mirror " +\
           "WHERE filename=?;"
+
     cursor = sqliteConnection.cursor()
     cursor.execute(sql, (filename,))
     numberOfRows = cursor.fetchone()[0]
+    cursor.close()
 
     if numberOfRows == 0:
         return False
@@ -670,9 +697,11 @@ def is_hash_known(sqliteConnection, hash_dbfile):
 
     sql = "SELECT COUNT() FROM db_hashes " +\
           "WHERE hash=?;"
+
     cursor = sqliteConnection.cursor()
     cursor.execute(sql, (hash_dbfile,))
     numberOfRows = cursor.fetchone()[0]
+    cursor.close()
 
     if numberOfRows >= 1:
         return True
@@ -719,6 +748,7 @@ def get_num_of_new_packages(sqliteConnection, name, filename, builddate):
     cursor = sqliteConnection.cursor()
     cursor.execute(sql, (name,))
     numberOfRows = cursor.fetchone()[0]
+    cursor.close()
 
     return numberOfRows
 # -----------------------------------------------------------------------------------
